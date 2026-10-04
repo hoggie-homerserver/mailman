@@ -496,6 +496,17 @@
 		{"format":15,"label":"1.20"},
 		{"format":18,"label":"1.20.2"},
 		{"format":26,"label":"1.20.3"},
+		{"format":41, "label":"1.20.5"},
+		{"format":41, "label":"1.20.6"},
+		{"format":48, "label":"1.21"},
+		{"format":48, "label":"1.21.1"},
+		{"format":57, "label":"1.21.2"},
+		{"format":57, "label":"1.21.3"},
+		{"format":61, "label":"1.21.4"},
+		{"format":71, "label":"1.21.5"},
+		{"format":88, "label":"1.21.9"},
+		{"format":94, "label":"1.21.11"},
+		{"format":121, "label":"26.3"}
 	];
 
 	const generate_datapackhub_versions = function(selected: Array<string>) {return selected.map(i => {if(i == "1.17") {return "1.17.x"} else return i })}
@@ -529,9 +540,6 @@
 			</div>
 			<p>
 				Upload your datapack versions to
-				<a class="text-orange-600" href="https://datapackhub.net" target="_blank"
-					>Datapack Hub</a
-				>,
 				<a class="text-green-600" href="https://modrinth.com" target="_blank"
 					>Modrinth</a
 				>, and
@@ -579,29 +587,6 @@
 					<div
 						class="flex flex-col md:flex-row justify-around space-y-2 md:space-y-0 md:space-x-2 w-full"
 					>
-						<!-- DATAPACK HUB -->
-						<div class="bg-zinc-950 w-full rounded-xl border-zinc-800 border-2 p-3 space-y-2">
-							<div class="flex items-center space-x-2">
-								<img src="./dph.png" class="h-8 w-8" alt="logo" />
-								<b>Datapack Hub</b>
-							</div>
-							{#if !authedDph}
-							<input
-								class="focus:outline-orange-600"
-								placeholder="datapackhub.net API token"
-								bind:value={dphToken}
-							/>
-							<Button click={authDph}><IconLogin2 /><span>Authenticate</span></Button>
-							{:else}
-								<p><b>User:</b> <span>{authedDph?.username}</span></p>
-								<select class="focus:outline-orange-600" bind:this={dphSelect} on:change={selectDph} bind:value={selectedDphIndex}>
-									<option>-- Select a pack --</option>
-									{#each dphPacks as pack}
-										<option value={pack.ID}>{pack.title}</option>
-									{/each}
-								</select>
-							{/if}
-						</div>
 
 						<!-- MODRINTH -->
 						<div class="bg-zinc-950 w-full rounded-xl border-zinc-800 border-2 p-3 space-y-2">
