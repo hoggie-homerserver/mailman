@@ -29,37 +29,89 @@
 	let dpfile: File | null | undefined;
 	let rpfile: File | null | undefined;
 
-	let dphSelect: HTMLSelectElement;
 	let smiSelect: HTMLSelectElement;
 	let modSelect: HTMLSelectElement;
 
-	let selectedDphPack: number;
 	let selectedSmiPack: string;
 	let selectedModPack: string;
 
-	let selectedDphIndex: any;
 	let selectedSmiIndex: any;
 	let selectedModIndex: any;
-
-	// Project Selection
-	function selectDph() {
-		// selectedDphIndex = dphSelect.selectedOptions[0].value
-		console.log("Selected Datapack Hub Pack: " + JSON.stringify(dphPacks[dphSelect.selectedIndex - 1]))
-		selectedDphPack = dphPacks[dphSelect.selectedIndex - 1].ID;
-	}
+	let createModProject = false;
+	let createSmiProject = false;
+	let newProjectName = '';
+	let newProjectDescription = '';
+	let newProjectId = '';
+	let newSmiPackDraft: { id: string; name: string; description: string } | null = null;
+	let smiDatapackUrl = '';
+	let smiResourcepackUrl = '';
 
 	// Project Selection
 	function selectSmi() {
-		// selectedSmiIndex = smiSelect.selectedOptions[0].value
-		console.log("Selected Smithed Pack: " + JSON.stringify(smithedPacks[smiSelect.selectedIndex - 1]))
-		selectedSmiPack = smithedPacks[smiSelect.selectedIndex - 1].id;
+		selectedSmiPack = smiSelect.value;
 	}
 
 	// Project Selection
 	function selectMod() {
-		// selectedModIndex = modSelect.selectedOptions[0].value
-		console.log("Selected Modrinth Pack: " + JSON.stringify(modPacks[modSelect.selectedIndex - 1]))
-		selectedModPack = modPacks[modSelect.selectedIndex - 1].id;
+		selectedModPack = modSelect.value;
+	}
+
+	async function createModrinthProject() {
+		if (!newProjectName.trim() || !newProjectDescription.trim()) return alert('Enter a project name and description.');
+		const slug = newProjectName.trim().toLowerCase().replace(/[^a-z0-9_]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 64);
+		if (slug.length < 3) return alert('The project name must produce a slug with at least 3 letters or numbers.');
+		let project: { title?: string; id: string } | null = null;
+		for (let attempt = 0; attempt < 3; attempt++) {
+			const projectSlug = attempt === 0 ? slug : `${slug}-${Math.random().toString(36).slice(2, 7)}`;
+			const formData = new FormData();
+			formData.append('data', JSON.stringify({
+				slug: projectSlug,
+				title: newProjectName.trim(),
+				description: newProjectDescription.trim(),
+				project_type: 'datapack',
+				categories: [],
+				body: newProjectDescription.trim(),
+				client_side: 'unsupported',
+				server_side: 'required',
+				license_id: 'LicenseRef-All-Rights-Reserved',
+				initial_versions: [],
+				requested_status: 'draft',
+				is_draft: true
+			}));
+			const response = await fetch('https://api.modrinth.com/v2/project', {
+				method: 'POST',
+				headers: { Authorization: modToken },
+				body: formData
+			});
+			if (response.ok) {
+				project = await response.json();
+				break;
+			}
+			const error = await response.json().catch(() => ({}));
+			const message = error.description ?? error.error ?? 'Check the project details and token permissions.';
+			if (response.status === 400 && /slug is already taken/i.test(message) && attempt < 2) continue;
+			return alert(`Could not create Modrinth project (${response.status}): ${message}`);
+		}
+		if (!project) return alert('Could not create a unique Modrinth project slug. Please try again.');
+		modPacks = [...modPacks, { title: project.title ?? newProjectName.trim(), id: project.id }];
+		selectedModPack = project.id;
+		selectedModIndex = project.id;
+		createModProject = false;
+		newProjectName = '';
+		newProjectDescription = '';
+	}
+
+	async function createSmithedProject() {
+		if (!newProjectName.trim() || !newProjectDescription.trim() || !newProjectId.trim()) return alert('Enter a pack name, description, and unique pack ID.');
+		const id = newProjectId.trim().toLowerCase();
+		if (!/^[a-z0-9_-]+$/.test(id)) return alert('Pack IDs can only contain letters, numbers, hyphens, and underscores.');
+		newSmiPackDraft = { id, name: newProjectName.trim(), description: newProjectDescription.trim() };
+		selectedSmiPack = '__new__';
+		selectedSmiIndex = '__new__';
+		createSmiProject = false;
+		newProjectName = '';
+		newProjectDescription = '';
+		newProjectId = '';
 	}
 
 	// Smithed stuff
@@ -88,14 +140,14 @@
 		try {
 			const userCredential = await signInWithEmailAndPassword(auth, email, password);
 			const user = userCredential.user;
-			const tok = await getIdToken(user);
-			const smithedApiTokenReq = await fetch(
-				`https://api.smithed.dev/v2/token?token=${tok}&expires=1d`
-			);
-			const smithedApiToken = await smithedApiTokenReq.text();
-			smithedToken = smithedApiToken;
+			// Smithed's write endpoints accept Firebase ID tokens directly. Using
+			// one avoids minting a PAT with guessed numeric scopes that can fail
+			// pack creation/version uploads.
+			smithedToken = await getIdToken(user);
 			smithedUser = userCredential.user;
 		} catch (error: any) {
+			smithedToken = null;
+			smithedUser = null;
 			alert('There was an error: ' + error.message);
 		}
 
@@ -162,42 +214,6 @@
 		}
 	}
 
-	let dphToken: string;
-
-	let authedDph: null | {
-		id: number;
-		bio: string;
-		profile_icon: string;
-		role: string;
-		username: string;
-		badges: string[];
-	} = null;
-
-	let dphPacks: {
-		title: string;
-		ID: number;
-	}[] = [];
-
-	async function authDph() {
-		let dphUser = await fetch(`https://api.datapackhub.net/user/me`, {
-			headers: {
-				Authorization: 'Basic ' + dphToken
-			}
-		});
-		if (dphUser.ok) {
-			let dphUserParsed = await dphUser.json();
-			authedDph = dphUserParsed;
-
-			let dphProjs = await fetch(
-				`https://api.datapackhub.net/user/${dphUserParsed.username}/projects`
-			);
-			if (dphProjs.ok) {
-				let dphProjsParsed = await dphProjs.json();
-				dphPacks = dphProjsParsed.result;
-			}
-			authed++;
-		}
-	}
 
 	let modToken: string;
 
@@ -322,7 +338,6 @@
 	// ------------ THE RELEVANT FUNCTION ------------
 
 	// Status
-	let dphStatus = 'Waiting...';
 	let modStatus = 'Waiting...';
 	let smiStatus = 'Waiting...';
 
@@ -337,40 +352,10 @@
 			resourcepack?: string
 		} = {};
 
-		if (authedDph && selectedDphPack) {
-			console.log("Posting DPH version: " + selectedDphPack)
-			dphStatus = 'Uploading...';
-			const formData = new FormData();
-			formData.append('name', title);
-			formData.append('description', changelog);
-			formData.append('minecraft_versions', JSON.stringify(generate_datapackhub_versions(mcVersions)));
-			formData.append('version_code', versionCode);
-			formData.append('filename', dpfile.name);
-			formData.append('primary_download', dpfile, dpfile.name);
-
-			if (rpfile) {
-				formData.append('v_rp', rpfile, rpfile.name);
-			}
-
-			let dphReq = await fetch(`https://api.datapackhub.net/versions/new/${selectedDphPack}`, {
-				method: 'POST',
-				headers: {
-					Authorization: 'Basic ' + dphToken
-				},
-				body: formData
-			});
-
-			if (dphReq.ok) {
-				dphStatus = 'Done!';
-				let dph_data = await dphReq.json();
-				file_link_data.datapack = dph_data.primary_download
-				if (rpfile) file_link_data.resourcepack = dph_data.resource_pack_download
-			} else dphStatus = 'Failed.';
-		}
-
 		if (authedModrinth && selectedModPack) {
 			console.log("Posting MOD version: " + selectedModPack)
 			modStatus = 'Uploading...';
+			if (authedSmithed && selectedSmiPack) smiStatus = 'Waiting for the Modrinth download URL...';
 			const formData = new FormData();
 
 			var modrinth_dependencies = []
@@ -390,46 +375,58 @@
 				loaders: ["datapack"],
 				featured: true,
 				project_id: selectedModPack,
-				file_types: {},
-				file_parts: [dpfile.name + '-primary'],
+				file_types: {} as Record<string, string>,
+				file_parts: ['datapack'],
+				primary_file: 'datapack',
 				version_type: releaseChannel,
 				dependencies: modrinth_dependencies
 			}
 
 			if (rpfile) {
-				data.file_types = {"resource_pack":"required-resource-pack"}
-				data.file_parts.push("resource_pack")
+				data.file_types = {"resource-pack": "required-resource-pack"}
+				data.file_parts.push("resource-pack")
 			}
 
 			formData.append("data", JSON.stringify(data))
-			formData.append(dpfile.name + '-primary', dpfile, dpfile.name);
-			if(rpfile) formData.append("resource-pack",rpfile,rpfile?.name)
+			formData.append('datapack', dpfile, dpfile.name);
+			if(rpfile) formData.append("resource-pack", rpfile, rpfile?.name)
 
-			let modReq = await fetch(`https://api.modrinth.com/v2/version`, {
-				method: 'POST',
-				headers: {
-					Authorization: modToken
-				},
-				body: formData
-			});
-
-			if (modReq.ok) {
-				modStatus = 'Done!';
-				if(file_link_data.datapack) {
-					let mod_out = await modReq.json()
-					file_link_data.datapack = mod_out.files[0].url
-					if (rpfile) file_link_data.resourcepack = mod_out.files[1].url
+			try {
+				// Probe the selected files before fetch so local/cloud-file access errors
+				// can be distinguished from a failed request to Modrinth.
+				await dpfile.slice(0, 1).arrayBuffer();
+				if (rpfile) await rpfile.slice(0, 1).arrayBuffer();
+				const modReq = await fetch(`https://api.modrinth.com/v2/version`, {
+					method: 'POST',
+					headers: { Authorization: modToken },
+					body: formData,
+					signal: AbortSignal.timeout(300000)
+				});
+				if (modReq.ok) {
+					const modOut = await modReq.json();
+					const uploadedFiles = modOut.files ?? [];
+					file_link_data.datapack = uploadedFiles.find((file: { primary?: boolean }) => file.primary)?.url ?? uploadedFiles[0]?.url;
+					if (rpfile) file_link_data.resourcepack = uploadedFiles.find((file: { filename?: string }) => file.filename === rpfile?.name)?.url ?? uploadedFiles[1]?.url;
+					modStatus = file_link_data.datapack ? 'Done!' : 'Uploaded, but Modrinth did not return a file URL.';
+				} else {
+					const error = await modReq.json().catch(() => ({}));
+					modStatus = `(${modReq.status}) Failed: ${error.description ?? error.error ?? 'Modrinth rejected the upload.'}`;
 				}
-				
-				
-			} else {
-				let mod_out = await modReq.json()
-				modStatus = `(${modReq.status}) Failed: ` + mod_out.description
-			};
+			} catch (error: any) {
+				console.error('Modrinth upload request failed before receiving a response:', error);
+				modStatus = error?.name === 'NotReadableError' || error?.name === 'SecurityError'
+					? 'Browser cannot read the selected file. Copy it to a local folder, reselect it, and retry.'
+					: error?.name === 'TimeoutError' || error?.name === 'AbortError'
+					? 'Timed out after 5 minutes. Check your connection and file size, then try again.'
+					: error?.name === 'TypeError'
+						? 'Browser could not reach Modrinth (network or CORS error). Check the browser Console and Network tab.'
+						: `Network error: ${error?.message ?? 'Could not reach Modrinth.'}`;
+			}
 		}
 
 		if (authedSmithed && selectedSmiPack) {
-			if (file_link_data.datapack) {
+			const datapackUrl = file_link_data.datapack || smiDatapackUrl.trim();
+			if (datapackUrl) {
 				console.log("Posting SMI version: " + selectedSmiPack)
 				smiStatus = 'Uploading...';
 				let smiUploadData: {
@@ -439,35 +436,69 @@
 					dependencies?: { id: string; version: string }[];
 				} = {
 					name: versionCode,
-					downloads: {
-						datapack: file_link_data.datapack
-					},
+					downloads: { datapack: datapackUrl },
 					supports: generate_smithed_versions(mcVersions),
 					dependencies: smiDeps.map(i => {return {id: i.id, version: i.version}})
 				};
 
-				if (rpfile) smiUploadData.downloads.resourcepack = file_link_data.resourcepack
+				if (rpfile) {
+					const resourcepackUrl = file_link_data.resourcepack || smiResourcepackUrl.trim();
+					if (!resourcepackUrl) { smiStatus = 'Failed: upload the resource pack to Modrinth or provide its hosted URL.'; return; }
+					smiUploadData.downloads.resourcepack = resourcepackUrl;
+				}
 
-				let smiReq = await fetch(
-					`https://api.smithed.dev/v2/packs/${selectedSmiPack}/versions?token=${smithedToken}&version=${versionCode}`,
-					{
-						method: 'POST',
-						headers: {
-							'content-type': 'application/json'
-						},
-						body: JSON.stringify({
-							data: smiUploadData
-						})
+				const draftToCreate = selectedSmiPack === '__new__' ? newSmiPackDraft : null;
+				const smiUrl = draftToCreate
+					? `https://api.smithed.dev/v2/packs?token=${encodeURIComponent(smithedToken ?? '')}&id=${encodeURIComponent(draftToCreate.id)}`
+					: `https://api.smithed.dev/v2/packs/${encodeURIComponent(selectedSmiPack)}/versions?token=${encodeURIComponent(smithedToken ?? '')}&version=${encodeURIComponent(versionCode)}`;
+				const smiBody = draftToCreate
+					? {
+						data: {
+							id: draftToCreate.id,
+							display: { name: draftToCreate.name, description: draftToCreate.description, icon: '', hidden: false },
+							versions: [smiUploadData],
+							categories: []
+						}
 					}
-				);
+					: { data: smiUploadData };
+				try {
+					const smiReq = await fetch(smiUrl, {
+						method: 'POST',
+						headers: { 'content-type': 'application/json' },
+						body: JSON.stringify(smiBody),
+						signal: AbortSignal.timeout(60000)
+					});
 
-				if (smiReq.ok) {
-					smiStatus = 'Done!';
-				} else {
-					smiStatus = 'Failed.';
+					if (smiReq.ok) {
+						smiStatus = 'Done!';
+						if (draftToCreate) {
+							const draft = draftToCreate;
+							smithedPacks = [...smithedPacks, {
+								id: draft.id,
+								display: { name: draft.name, description: draft.description, icon: '', hidden: false, webPage: undefined },
+								versions: [versionCode],
+								categories: []
+							}];
+							selectedSmiPack = draft.id;
+							selectedSmiIndex = draft.id;
+							newSmiPackDraft = null;
+						}
+					} else {
+						const responseText = await smiReq.text();
+						let error: any = {};
+						try { error = JSON.parse(responseText); } catch { error = {}; }
+						const message = typeof error === 'string'
+							? error
+							: error.message ?? error.description ?? (responseText || 'Smithed rejected this version.');
+						smiStatus = `(${smiReq.status}) Failed: ${message}`;
+					}
+				} catch (error: any) {
+					smiStatus = error?.name === 'TimeoutError' || error?.name === 'AbortError'
+						? 'Timed out after 1 minute.'
+						: `Network error: ${error?.message ?? 'Could not reach Smithed.'}`;
 				}
 			} else {
-				smiStatus = 'Failed: Uploading to smithed cannot work if uploading to the other sites did not work.';
+				smiStatus = 'Failed: upload to Modrinth first or provide a hosted datapack URL below.';
 			}
 		}
 	}
@@ -509,7 +540,6 @@
 		{"format":121, "label":"26.3"}
 	];
 
-	const generate_datapackhub_versions = function(selected: Array<string>) {return selected.map(i => {if(i == "1.17") {return "1.17.x"} else return i })}
 
 	const generate_smithed_versions = function(selected: Array<string>) {
 		let temp = selected
@@ -607,11 +637,18 @@
 							{:else}
 								<p><b>User:</b> <span>{authedModrinth.username}</span></p>
 								<select class="focus:outline-green-500" on:change={selectMod} bind:this={modSelect} bind:value={selectedModIndex}>
-									<option>-- Select a pack --</option>
+									<option value="">-- Select a pack --</option>
 									{#each modPacks as pack}
-										<option>{pack.title}</option>
+										<option value={pack.id}>{pack.title}</option>
 									{/each}
 								</select>
+								{#if !createModProject}
+									<Button click={() => createModProject = true}><IconPlus /><span>Create a project</span></Button>
+								{:else}
+									<input placeholder="Project name" bind:value={newProjectName} />
+									<input placeholder="Short description" bind:value={newProjectDescription} />
+									<div class="flex space-x-2"><Button click={createModrinthProject}><IconPlus /><span>Create</span></Button><button class="text-zinc-400" on:click={() => createModProject = false}>Cancel</button></div>
+								{/if}
 							{/if}
 						</div>
 
@@ -637,11 +674,21 @@
 							{:else}
 								<p><b>User:</b> <span>{authedSmithed.displayName}</span></p>
 								<select class="focus:outline-blue-500" on:change={selectSmi} bind:this={smiSelect} bind:value={selectedSmiIndex}>
-									<option>-- Select a pack --</option>
+									<option value="">-- Select a pack --</option>
 									{#each smithedPacks as pack}
-										<option>{pack.display.name}</option>
+										<option value={pack.id}>{pack.display.name}</option>
 									{/each}
+									{#if newSmiPackDraft}<option value="__new__">New pack: {newSmiPackDraft.name}</option>{/if}
 								</select>
+								{#if !createSmiProject}
+									<Button click={() => createSmiProject = true}><IconPlus /><span>Create a pack</span></Button>
+								{:else}
+					<input placeholder="Pack name" bind:value={newProjectName} />
+									<input placeholder="Unique pack ID (e.g. my_pack)" bind:value={newProjectId} />
+									<input placeholder="Short description" bind:value={newProjectDescription} />
+									<p class="text-xs text-zinc-500">The pack will be created when you upload this version, so its first version includes the real download URL.</p>
+					<div class="flex space-x-2"><Button click={createSmithedProject}><IconPlus /><span>Create</span></Button><button class="text-zinc-400" on:click={() => createSmiProject = false}>Cancel</button></div>
+								{/if}
 							{/if}
 						</div>
 					</div>
@@ -652,19 +699,19 @@
 				{:else if page == 2}
 					<h2 class="text-sm -1 flex space-x-1 items-center">
 						<IconHeading /><span>Title</span>
-						<Dots dots={['mod', 'dph']} />
+						<Dots dots={['mod']} />
 					</h2>
 					<input placeholder="The Snails Update" bind:value={title} />
 
 					<h2 class="text-sm mt-5 mb-1 flex space-x-1 items-center">
 						<IconListNumbers /><span>Version Code</span>
-						<Dots dots={['mod', 'smi', 'dph']} />
+						<Dots dots={['mod', 'smi']} />
 					</h2>
 					<input placeholder="v1.2.3" bind:value={versionCode} />
 
 					<h2 class="text-sm mt-5 mb-1 flex space-x-1 items-center">
 						<IconFileDescription /><span>Changelog</span>
-						<Dots dots={['mod', 'dph']} />
+						<Dots dots={['mod']} />
 					</h2>
 					<textarea
 						placeholder="This version adds a snail you can worship, among other bug fixes"
@@ -672,7 +719,7 @@
 					/>
 					<h2 class="text-sm mb-1 mt-3 flex space-x-1 items-center">
 						<IconVersions /><span
-							>Supported Minecraft Versions <Dots dots={['mod', 'dph', 'smi']} /></span
+							>Supported Minecraft Versions <Dots dots={['mod', 'smi']} /></span
 						>
 					</h2>
 					<MultiSelect
@@ -802,7 +849,7 @@
 
 					<h2 class="text-sm mt-5 mb-1 flex space-x-1 items-center">
 						<IconPaperclip /><span>Resource Pack</span>
-						<Dots dots={['mod', 'smi', 'dph']} />
+						<Dots dots={['mod', 'smi']} />
 					</h2>
 
 					<input
@@ -819,6 +866,11 @@
 						class="items-center flex w-fit bg-zinc-900 text-zinc-400 rounded-md h-8 p-2 px-2 cursor-pointer  hover:text-zinc-300 mb-1 space-x-1"
 						><IconUpload /><span>{#if !rpfile}Add Resource Pack file{:else}{rpfile.name} (click to change){/if}</span></label
 					>
+					{#if authedSmithed && selectedSmiPack}
+						<p class="text-sm mt-3">Smithed uses public download URLs. Modrinth upload URLs are filled in automatically; use these only if you host the files elsewhere or need a fallback.</p>
+						<input type="url" placeholder="Hosted datapack URL" bind:value={smiDatapackUrl} />
+						{#if rpfile}<input type="url" placeholder="Hosted resource pack URL" bind:value={smiResourcepackUrl} />{/if}
+					{/if}
 
 					<p class="text-sm text-zinc-500 mt-2 flex space-x-1 items-center">
 						<IconMoodHappy /><span
@@ -876,13 +928,6 @@
 					</div>
 				{:else if page == 4}
 					<div class="p-3 bg-zinc-900 rounded-xl max-w-full space-y-3">
-						{#if authedDph}
-						<div class="flex items-center space-x-2">
-							<img src="./dph.png" class="h-8 w-8" alt="logo" />
-							<b class="text-orange-600">Datapack Hub: </b>
-							<span class="italic text-gray-400">{dphStatus}</span>
-						</div>
-						{/if}
 						{#if authedModrinth}
 						<div class="flex items-center space-x-2">
 							<img src="/modrinth.svg" class="h-8" alt="logo">
